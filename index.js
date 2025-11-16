@@ -52,10 +52,165 @@ function cookieSession (options) {
   if (opts.overwrite == null) opts.overwrite = true
   if (opts.httpOnly == null) opts.httpOnly = true
   if (opts.signed == null) opts.signed = true
+  if (opts.encode == null) opts.encode = encode
+  if (opts.decode == null) opts.decode = decode
 
   if (!keys && opts.signed) throw new Error('.keys required.')
 
   debug('session options %j', opts)
+
+  /**
+   * Session model.
+   *
+   * @param {Context} ctx
+   * @param {Object} obj
+   * @private
+   */
+
+  function Session (ctx, obj) {
+    Object.defineProperty(this, '_ctx', {
+      value: ctx
+    })
+
+    if (obj) {
+      for (var key in obj) {
+        if (!(key in this)) {
+          this[key] = obj[key]
+        }
+      }
+    }
+  }
+
+  /**
+   * Create new session.
+   * @private
+   */
+
+  Session.create = function create (obj) {
+    var ctx = new SessionContext()
+    return new Session(ctx, obj)
+  }
+
+  /**
+   * Create session from serialized form.
+   * @private
+   */
+
+  Session.deserialize = function deserialize (str) {
+    var ctx = new SessionContext()
+    var obj = opts.decode(str)
+
+    ctx._new = false
+    ctx._val = str
+
+    return new Session(ctx, obj)
+  }
+
+  /**
+   * Serialize a session to a string.
+   * @private
+   */
+
+  Session.serialize = function serialize (sess) {
+    return opts.encode(sess)
+  }
+
+  /**
+   * Return if the session is changed for this request.
+   *
+   * @return {Boolean}
+   * @public
+   */
+
+  Object.defineProperty(Session.prototype, 'isChanged', {
+    get: function getIsChanged () {
+      return this._ctx._new || this._ctx._val !== Session.serialize(this)
+    }
+  })
+
+  /**
+   * Return if the session is new for this request.
+   *
+   * @return {Boolean}
+   * @public
+   */
+
+  Object.defineProperty(Session.prototype, 'isNew', {
+    get: function getIsNew () {
+      return this._ctx._new
+    }
+  })
+
+  /**
+   * populated flag, which is just a boolean alias of .length.
+   *
+   * @return {Boolean}
+   * @public
+   */
+
+  Object.defineProperty(Session.prototype, 'isPopulated', {
+    get: function getIsPopulated () {
+      return Object.keys(this).length > 0
+    }
+  })
+
+  /**
+   * Session context to store metadata.
+   *
+   * @private
+   */
+
+  function SessionContext () {
+    this._new = true
+    this._val = undefined
+  }
+
+  /**
+   * Decode the base64 cookie value to an object.
+   *
+   * @param {String} string
+   * @return {Object}
+   * @private
+   */
+
+  function decode (string) {
+    var body = Buffer.from(string, 'base64').toString('utf8')
+    return JSON.parse(body)
+  }
+
+  /**
+   * Encode an object into a base64-encoded JSON string.
+   *
+   * @param {Object} body
+   * @return {String}
+   * @private
+   */
+
+  function encode (body) {
+    var str = JSON.stringify(body)
+    return Buffer.from(str).toString('base64')
+  }
+
+  /**
+   * Try getting a session from a cookie.
+   * @private
+   */
+
+  function tryGetSession (cookies, name, opts) {
+    var str = cookies.get(name, opts)
+
+    if (!str) {
+      return undefined
+    }
+
+    debug('parse %s', str)
+
+    try {
+      return Session.deserialize(str)
+    } catch (err) {
+      return undefined
+    }
+  }
 
   return function _cookieSession (req, res, next) {
     var cookies = new Cookies(req, res, {
@@ -136,155 +291,3 @@ function cookieSession (options) {
   }
 };
 
-/**
- * Session model.
- *
- * @param {Context} ctx
- * @param {Object} obj
- * @private
- */
-
-function Session (ctx, obj) {
-  Object.defineProperty(this, '_ctx', {
-    value: ctx
-  })
-
-  if (obj) {
-    for (var key in obj) {
-      if (!(key in this)) {
-        this[key] = obj[key]
-      }
-    }
-  }
-}
-
-/**
- * Create new session.
- * @private
- */
-
-Session.create = function create (obj) {
-  var ctx = new SessionContext()
-  return new Session(ctx, obj)
-}
-
-/**
- * Create session from serialized form.
- * @private
- */
-
-Session.deserialize = function deserialize (str) {
-  var ctx = new SessionContext()
-  var obj = decode(str)
-
-  ctx._new = false
-  ctx._val = str
-
-  return new Session(ctx, obj)
-}
-
-/**
- * Serialize a session to a string.
- * @private
- */
-
-Session.serialize = function serialize (sess) {
-  return encode(sess)
-}
-
-/**
- * Return if the session is changed for this request.
- *
- * @return {Boolean}
- * @public
- */
-
-Object.defineProperty(Session.prototype, 'isChanged', {
-  get: function getIsChanged () {
-    return this._ctx._new || this._ctx._val !== Session.serialize(this)
-  }
-})
-
-/**
- * Return if the session is new for this request.
- *
- * @return {Boolean}
- * @public
- */
-
-Object.defineProperty(Session.prototype, 'isNew', {
-  get: function getIsNew () {
-    return this._ctx._new
-  }
-})
-
-/**
- * populated flag, which is just a boolean alias of .length.
- *
- * @return {Boolean}
- * @public
- */
-
-Object.defineProperty(Session.prototype, 'isPopulated', {
-  get: function getIsPopulated () {
-    return Object.keys(this).length > 0
-  }
-})
-
-/**
- * Session context to store metadata.
- *
- * @private
- */
-
-function SessionContext () {
-  this._new = true
-  this._val = undefined
-}
-
-/**
- * Decode the base64 cookie value to an object.
- *
- * @param {String} string
- * @return {Object}
- * @private
- */
-
-function decode (string) {
-  var body = Buffer.from(string, 'base64').toString('utf8')
-  return JSON.parse(body)
-}
-
-/**
- * Encode an object into a base64-encoded JSON string.
- *
- * @param {Object} body
- * @return {String}
- * @private
- */
-
-function encode (body) {
-  var str = JSON.stringify(body)
-  return Buffer.from(str).toString('base64')
-}
-
-/**
- * Try getting a session from a cookie.
- * @private
- */
-
-function tryGetSession (cookies, name, opts) {
-  var str = cookies.get(name, opts)
-
-  if (!str) {
-    return undefined
-  }
-
-  debug('parse %s', str)
-
-  try {
-    return Session.deserialize(str)
-  } catch (err) {
-    return undefined
-  }
-}
